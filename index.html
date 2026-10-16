@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Camera UI - Monochrome</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Glassmorphism Styling */
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #111; 
+            color: #eee; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+        }
+        
+        #camera-view { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            object-fit: cover; 
+            z-index: -1; 
+            filter: grayscale(20%); /* Slight monochrome touch to the camera if desired, but kept minimal */
+        }
+        
+        /* Compass Visuals */
+        .compass-circle { 
+            width: 70px; 
+            height: 70px; 
+            border-radius: 50%; 
+            border: 1px solid rgba(255, 255, 255, 0.3); 
+            position: relative; 
+            background: rgba(0, 0, 0, 0.2);
+            transition: transform 0.1s ease-out;
+        }
+        .compass-needle { 
+            width: 2px; 
+            height: 35px; 
+            background: #fff; 
+            position: absolute; 
+            bottom: 50%; 
+            left: 50%; 
+            transform-origin: bottom center; 
+            transform: translateX(-50%); 
+        }
+        .compass-label { 
+            position: absolute; 
+            font-size: 10px; 
+            font-weight: 600; 
+            color: #aaa;
+        }
+        .label-n { top: 4px; left: 50%; transform: translateX(-50%); color: #fff; }
+        .label-e { right: 4px; top: 50%; transform: translateY(-50%); }
+        .label-s { bottom: 4px; left: 50%; transform: translateX(-50%); }
+        .label-w { left: 4px; top: 50%; transform: translateY(-50%); }
+        
+        /* Tilt Meter Visuals */
+        .tilt-box { 
+            width: 70px; 
+            height: 70px; 
+            border-radius: 50%; 
+            border: 1px solid rgba(255, 255, 255, 0.3); 
+            position: relative; 
+            overflow: hidden; 
+            background: rgba(0, 0, 0, 0.2);
+        }
+        /* Artificial Horizon */
+        .horizon-group {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            transition: transform 0.1s ease-out;
+        }
+        .horizon-sky {
+            position: absolute;
+            top: -100px; left: -100px; right: -100px; height: calc(100px + 50%);
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .horizon-ground {
+            position: absolute;
+            bottom: -100px; left: -100px; right: -100px; height: calc(100px + 50%);
+            background: rgba(0, 0, 0, 0.4);
+            border-top: 1px solid #fff;
+        }
+        .tilt-crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 30px; height: 1px;
+            background: #fff;
+            z-index: 2;
+        }
+        .tilt-crosshair::after {
+            content: '';
+            position: absolute;
+            top: -5px; left: 50%;
+            transform: translateX(-50%);
+            width: 1px; height: 10px;
+            background: #fff;
+        }
+    </style>
+</head>
+<body>
+    <!-- Start Overlay for Permissions -->
+    <div id="start-overlay" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-80 z-50 backdrop-blur-sm">
+        <div class="text-center p-6 glass rounded-2xl max-w-sm mx-4">
+            <h1 class="text-2xl font-semibold text-white mb-2">AR Camera Interface</h1>
+            <p class="text-gray-400 text-sm mb-6">Aplikasi ini membutuhkan akses kamera dan sensor gerak (kompas & orientasi).</p>
+            <button id="start-btn" class="w-full bg-white text-black font-semibold py-3 px-6 rounded-xl hover:bg-gray-200 transition">
+                Mulai
+            </button>
+        </div>
+    </div>
+
+    <!-- Background Camera Video -->
+    <video id="camera-view" autoplay playsinline muted></video>
+
+    <!-- UI Overlay (Minimalist Glassmorphism Monochrome) -->
+    <div class="fixed inset-0 pointer-events-none p-5 flex flex-col justify-between" style="z-index: 10;">
+        
+        <!-- Top Section -->
+        <div class="flex justify-between items-start">
+            
+            <!-- Left: Clock, Date, Battery -->
+            <div class="glass p-4 rounded-2xl flex flex-col gap-1 w-32">
+                <div id="time" class="text-3xl font-light text-white tracking-wider">00:00</div>
+                <div id="date" class="text-xs text-gray-400 uppercase tracking-wide">Tanggal</div>
+                <div class="w-full h-px bg-white bg-opacity-20 my-1"></div>
+                <div class="text-xs flex justify-between items-center text-gray-300">
+                    <span>BATTERY</span> 
+                    <span id="battery" class="font-semibold text-white">--%</span>
+                </div>
+            </div>
+
+            <!-- Right: Sensors (Compass & Tilt Meter in separate adjacent containers) -->
+            <div class="flex gap-3">
+                
+                <!-- Compass Container -->
+                <div class="glass p-3 rounded-2xl flex flex-col items-center justify-center min-w-[90px]">
+                    <span class="text-[10px] text-gray-400 font-semibold tracking-widest mb-2">COMPASS</span>
+                    <div class="compass-circle" id="compass-container">
+                        <div class="compass-label label-n">N</div>
+                        <div class="compass-label label-e">E</div>
+                        <div class="compass-label label-s">S</div>
+                        <div class="compass-label label-w">W</div>
+                        <div class="compass-needle"></div>
+                    </div>
+                    <span id="compass-text" class="text-xs font-mono mt-2 text-gray-200">0°</span>
+                </div>
+
+                <!-- Tilt Meter Container -->
+                <div class="glass p-3 rounded-2xl flex flex-col items-center justify-center min-w-[90px]">
+                    <span class="text-[10px] text-gray-400 font-semibold tracking-widest mb-2">TILT</span>
+                    <div class="tilt-box">
+                        <div class="horizon-group" id="horizon-group">
+                            <div class="horizon-sky"></div>
+                            <div class="horizon-ground"></div>
+                        </div>
+                        <div class="tilt-crosshair"></div>
+                    </div>
+                    <div class="flex gap-2 text-[9px] font-mono mt-2 text-gray-300">
+                        <span>P:<span id="pitch-text" class="text-white ml-1">0°</span></span>
+                        <span>R:<span id="roll-text" class="text-white ml-1">0°</span></span>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+        
+        <!-- Bottom Section for future features -->
+        <div class="flex justify-center">
+            <!-- Reserved for future UI controls -->
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const startOverlay = document.getElementById('start-overlay');
+        const video = document.getElementById('camera-view');
+        
+        const compassContainer = document.getElementById('compass-container');
+        const compassText = document.getElementById('compass-text');
+        
+        const horizonGroup = document.getElementById('horizon-group');
+        const pitchText = document.getElementById('pitch-text');
+        const rollText = document.getElementById('roll-text');
+        
+        const timeEl = document.getElementById('time');
+        const dateEl = document.getElementById('date');
+        const batteryEl = document.getElementById('battery');
+
+        startBtn.addEventListener('click', async () => {
+            startOverlay.style.opacity = '0';
+            setTimeout(() => { startOverlay.style.display = 'none'; }, 300);
+            
+            // 1. Request Camera Access
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' },
+                    audio: false 
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                alert('Gagal mengakses kamera. Pastikan izin kamera diberikan.');
+            }
+
+            // 2. Request Device Orientation (Compass & Tilt)
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS 13+ requires explicit permission request
+                try {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') {
+                        window.addEventListener('deviceorientation', handleOrientation);
+                    } else {
+                        alert('Izin sensor gerak ditolak.');
+                    }
+                } catch (err) {
+                    console.error('Orientation error:', err);
+                }
+            } else {
+                // Non iOS 13+ devices
+                window.addEventListener('deviceorientation', handleOrientation, true);
+            }
+        });
+
+        function handleOrientation(event) {
+            let alpha = event.alpha || 0; // z-axis (compass fallback)
+            let beta = event.beta || 0;   // x-axis (pitch) -180 to 180
+            let gamma = event.gamma || 0; // y-axis (roll) -90 to 90
+
+            // --- COMPASS CALCULATION ---
+            let heading = event.webkitCompassHeading;
+            if (heading == null) {
+                heading = 360 - alpha; // Fallback for Android
+            }
+            
+            // Rotate compass dial
+            compassContainer.style.transform = `rotate(${-heading}deg)`;
+            compassText.innerText = `${Math.round(heading)}°`;
+
+            // --- TILT METER CALCULATION ---
+            let pitch = beta;
+            let roll = gamma;
+            
+            // Handle edge cases if device is upside down
+            if (pitch > 90) pitch = 90;
+            if (pitch < -90) pitch = -90;
+
+            // Update horizon visual (Pitch moves it up/down, Roll rotates it)
+            // 1 degree pitch = ~0.8 pixels translation (adjustable for visual effect)
+            let pitchTranslation = pitch * 0.8; 
+            
+            horizonGroup.style.transform = `rotate(${-roll}deg) translateY(${pitchTranslation}px)`;
+            
+            pitchText.innerText = `${Math.round(pitch)}°`;
+            rollText.innerText = `${Math.round(roll)}°`;
+        }
+
+        // --- UPDATE CLOCK & DATE ---
+        function updateTime() {
+            const now = new Date();
+            timeEl.innerText = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            dateEl.innerText = now.toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short' });
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        // --- UPDATE BATTERY ---
+        if ('getBattery' in navigator) {
+            navigator.getBattery().then(function(battery) {
+                function updateBattery() {
+                    batteryEl.innerText = Math.round(battery.level * 100) + '%';
+                }
+                updateBattery();
+                battery.addEventListener('levelchange', updateBattery);
+            });
+        }
+    </script>
+</body>
+</html>
